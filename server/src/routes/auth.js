@@ -42,8 +42,8 @@ router.post('/login', (req, res) => {
 
     const token = jwt.sign(
       { id: user.id, username: user.username, role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
+      process.env.JWT_SECRET || 'default-secret-key-change-in-production',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
     res.json({
