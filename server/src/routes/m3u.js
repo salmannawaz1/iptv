@@ -82,7 +82,7 @@ async function handleMultipartUpload(req, res) {
     let channelCount = 0;
     let fileProcessed = false;
     let m3uContent = '';
-    const MAX_STORE_SIZE = 10 * 1024 * 1024; // Only store content if < 10MB
+    const MAX_STORE_SIZE = 100 * 1024 * 1024; // Store content up to 100MB
     let contentSize = 0;
     let buffer = '';
     
