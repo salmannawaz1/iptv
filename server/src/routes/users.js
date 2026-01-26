@@ -41,10 +41,10 @@ router.get('/', authenticateToken, isReseller, isActiveReseller, async (req, res
 });
 
 // Get single user
-router.get('/:id', authenticateToken, isReseller, isActiveReseller, (req, res) => {
+router.get('/:id', authenticateToken, isReseller, isActiveReseller, async (req, res) => {
   try {
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -64,7 +64,7 @@ router.get('/:id', authenticateToken, isReseller, isActiveReseller, (req, res) =
 });
 
 // Create new user
-router.post('/', authenticateToken, isReseller, isActiveReseller, (req, res) => {
+router.post('/', authenticateToken, isReseller, isActiveReseller, async (req, res) => {
   try {
     const db = getDb();
     const { username, password, max_connections, expiry_days, notes, bouquet_ids, m3u_url, m3u_playlist_id } = req.body;
@@ -74,15 +74,15 @@ router.post('/', authenticateToken, isReseller, isActiveReseller, (req, res) => 
     }
 
     // Check if username exists
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    const existing = await db.prepare('SELECT id FROM users WHERE username = ?').get(username);
     if (existing) {
       return res.status(400).json({ error: 'Username already exists' });
     }
 
     // For resellers, check credits
     if (req.user.role === 'reseller') {
-      const reseller = db.prepare('SELECT credits, max_users FROM resellers WHERE id = ?').get(req.user.id);
-      const userCount = db.prepare('SELECT COUNT(*) as count FROM users WHERE reseller_id = ?').get(req.user.id);
+      const reseller = await db.prepare('SELECT credits, max_users FROM resellers WHERE id = ?').get(req.user.id);
+      const userCount = await db.prepare('SELECT COUNT(*) as count FROM users WHERE reseller_id = ?').get(req.user.id);
 
       if (userCount.count >= reseller.max_users) {
         return res.status(400).json({ error: 'Maximum user limit reached' });
@@ -93,10 +93,10 @@ router.post('/', authenticateToken, isReseller, isActiveReseller, (req, res) => 
       }
 
       // Deduct credit
-      db.prepare('UPDATE resellers SET credits = credits - 1 WHERE id = ?').run(req.user.id);
+      await db.prepare('UPDATE resellers SET credits = credits - 1 WHERE id = ?').run(req.user.id);
 
       // Log transaction
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO credit_transactions (id, reseller_id, amount, type, description)
         VALUES (?, ?, ?, ?, ?)
       `).run(uuidv4(), req.user.id, -1, 'user_creation', `Created user: ${username}`);
@@ -120,21 +120,20 @@ router.post('/', authenticateToken, isReseller, isActiveReseller, (req, res) => 
     const userM3uUrl = m3u_url || '';
     const userPlaylistId = m3u_playlist_id || null;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, username, password, max_connections, expiry_date, reseller_id, notes, m3u_url, m3u_playlist_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(userId, username, hashedPassword, maxConn, expiryDate.toISOString(), resellerId, userNotes, userM3uUrl, userPlaylistId);
 
     // Assign bouquets
     if (bouquet_ids && bouquet_ids.length > 0) {
-      const insertBouquet = db.prepare('INSERT INTO user_bouquets (user_id, bouquet_id) VALUES (?, ?)');
-      bouquet_ids.forEach(bouquetId => {
-        insertBouquet.run(userId, bouquetId);
-      });
+      for (const bouquetId of bouquet_ids) {
+        await db.prepare('INSERT INTO user_bouquets (user_id, bouquet_id) VALUES (?, ?)').run(userId, bouquetId);
+      }
     }
 
     // Log activity
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO activity_logs (id, actor_type, actor_id, action, details)
       VALUES (?, ?, ?, ?, ?)
     `).run(uuidv4(), req.user.role, req.user.id, 'create_user', JSON.stringify({ username, userId }));
@@ -150,10 +149,10 @@ router.post('/', authenticateToken, isReseller, isActiveReseller, (req, res) => 
 });
 
 // Update user
-router.put('/:id', authenticateToken, isReseller, isActiveReseller, (req, res) => {
+router.put('/:id', authenticateToken, isReseller, isActiveReseller, async (req, res) => {
   try {
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -199,17 +198,16 @@ router.put('/:id', authenticateToken, isReseller, isActiveReseller, (req, res) =
 
     if (updates.length > 0) {
       params.push(req.params.id);
-      db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+      await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     }
 
     // Update bouquets
     if (bouquet_ids !== undefined) {
-      db.prepare('DELETE FROM user_bouquets WHERE user_id = ?').run(req.params.id);
+      await db.prepare('DELETE FROM user_bouquets WHERE user_id = ?').run(req.params.id);
       if (bouquet_ids.length > 0) {
-        const insertBouquet = db.prepare('INSERT INTO user_bouquets (user_id, bouquet_id) VALUES (?, ?)');
-        bouquet_ids.forEach(bouquetId => {
-          insertBouquet.run(req.params.id, bouquetId);
-        });
+        for (const bouquetId of bouquet_ids) {
+          await db.prepare('INSERT INTO user_bouquets (user_id, bouquet_id) VALUES (?, ?)').run(req.params.id, bouquetId);
+        }
       }
     }
 
@@ -221,10 +219,10 @@ router.put('/:id', authenticateToken, isReseller, isActiveReseller, (req, res) =
 });
 
 // Delete user
-router.delete('/:id', authenticateToken, isReseller, isActiveReseller, (req, res) => {
+router.delete('/:id', authenticateToken, isReseller, isActiveReseller, async (req, res) => {
   try {
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -234,10 +232,10 @@ router.delete('/:id', authenticateToken, isReseller, isActiveReseller, (req, res
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
 
     // Log activity
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO activity_logs (id, actor_type, actor_id, action, details)
       VALUES (?, ?, ?, ?, ?)
     `).run(uuidv4(), req.user.role, req.user.id, 'delete_user', JSON.stringify({ username: user.username }));
@@ -250,11 +248,11 @@ router.delete('/:id', authenticateToken, isReseller, isActiveReseller, (req, res
 });
 
 // Extend user subscription
-router.post('/:id/extend', authenticateToken, isReseller, isActiveReseller, (req, res) => {
+router.post('/:id/extend', authenticateToken, isReseller, isActiveReseller, async (req, res) => {
   try {
     const db = getDb();
     const { days } = req.body;
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -266,13 +264,13 @@ router.post('/:id/extend', authenticateToken, isReseller, isActiveReseller, (req
 
     // Check credits for resellers
     if (req.user.role === 'reseller') {
-      const reseller = db.prepare('SELECT credits FROM resellers WHERE id = ?').get(req.user.id);
+      const reseller = await db.prepare('SELECT credits FROM resellers WHERE id = ?').get(req.user.id);
       if (reseller.credits < 1) {
         return res.status(400).json({ error: 'Insufficient credits' });
       }
 
-      db.prepare('UPDATE resellers SET credits = credits - 1 WHERE id = ?').run(req.user.id);
-      db.prepare(`
+      await db.prepare('UPDATE resellers SET credits = credits - 1 WHERE id = ?').run(req.user.id);
+      await db.prepare(`
         INSERT INTO credit_transactions (id, reseller_id, amount, type, description)
         VALUES (?, ?, ?, ?, ?)
       `).run(uuidv4(), req.user.id, -1, 'subscription_extend', `Extended user: ${user.username}`);
@@ -283,7 +281,7 @@ router.post('/:id/extend', authenticateToken, isReseller, isActiveReseller, (req
     const baseDate = currentExpiry > now ? currentExpiry : now;
     baseDate.setDate(baseDate.getDate() + (days || 30));
 
-    db.prepare('UPDATE users SET expiry_date = ? WHERE id = ?').run(baseDate.toISOString(), req.params.id);
+    await db.prepare('UPDATE users SET expiry_date = ? WHERE id = ?').run(baseDate.toISOString(), req.params.id);
 
     res.json({ message: 'Subscription extended', new_expiry: baseDate.toISOString() });
   } catch (err) {

@@ -47,10 +47,10 @@ router.post('/bouquets', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // Generate M3U playlist info for a user
-router.get('/m3u/:userId', authenticateToken, isReseller, isActiveReseller, (req, res) => {
+router.get('/m3u/:userId', authenticateToken, isReseller, isActiveReseller, async (req, res) => {
   try {
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.userId);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -93,7 +93,7 @@ router.get('/play/:username/:password', async (req, res) => {
     const db = getDb();
     const { username, password } = req.params;
 
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username);
 
     if (!user || user.password !== password) {
       // Also check if password matches the plain text (for simple setups)
@@ -145,7 +145,7 @@ http://sample-stream.com/live/news.m3u8
 });
 
 // Validate user credentials (for IPTV player authentication)
-router.post('/validate', (req, res) => {
+router.post('/validate', async (req, res) => {
   try {
     const db = getDb();
     const { username, password } = req.body;
@@ -154,7 +154,7 @@ router.post('/validate', (req, res) => {
       return res.status(400).json({ error: 'Credentials required' });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username);
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -201,10 +201,10 @@ router.post('/validate', (req, res) => {
 });
 
 // Get user's assigned bouquets
-router.get('/user/:userId/bouquets', authenticateToken, isReseller, (req, res) => {
+router.get('/user/:userId/bouquets', authenticateToken, isReseller, async (req, res) => {
   try {
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.userId);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -214,7 +214,7 @@ router.get('/user/:userId/bouquets', authenticateToken, isReseller, (req, res) =
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const bouquets = db.prepare(`
+    const bouquets = await db.prepare(`
       SELECT b.* FROM bouquets b
       INNER JOIN user_bouquets ub ON b.id = ub.bouquet_id
       WHERE ub.user_id = ?

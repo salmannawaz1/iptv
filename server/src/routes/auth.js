@@ -63,14 +63,14 @@ router.post('/login', async (req, res) => {
 });
 
 // Get current user info
-router.get('/me', authenticateToken, (req, res) => {
+router.get('/me', authenticateToken, async (req, res) => {
   try {
     const db = getDb();
     let user;
     if (req.user.role === 'admin') {
-      user = db.prepare('SELECT id, username, email, created_at FROM admins WHERE id = ?').get(req.user.id);
+      user = await db.prepare('SELECT id, username, email, created_at FROM admins WHERE id = ?').get(req.user.id);
     } else {
-      user = db.prepare('SELECT id, username, email, credits, max_users, is_active, created_at FROM resellers WHERE id = ?').get(req.user.id);
+      user = await db.prepare('SELECT id, username, email, credits, max_users, is_active, created_at FROM resellers WHERE id = ?').get(req.user.id);
     }
 
     if (!user) {
@@ -85,7 +85,7 @@ router.get('/me', authenticateToken, (req, res) => {
 });
 
 // Change password
-router.post('/change-password', authenticateToken, (req, res) => {
+router.post('/change-password', authenticateToken, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
@@ -95,14 +95,14 @@ router.post('/change-password', authenticateToken, (req, res) => {
 
     const db = getDb();
     const table = req.user.role === 'admin' ? 'admins' : 'resellers';
-    const user = db.prepare(`SELECT password FROM ${table} WHERE id = ?`).get(req.user.id);
+    const user = await db.prepare(`SELECT password FROM ${table} WHERE id = ?`).get(req.user.id);
 
     if (!bcrypt.compareSync(currentPassword, user.password)) {
       return res.status(400).json({ error: 'Current password is incorrect' });
     }
 
     const hashedPassword = bcrypt.hashSync(newPassword, 10);
-    db.prepare(`UPDATE ${table} SET password = ? WHERE id = ?`).run(hashedPassword, req.user.id);
+    await db.prepare(`UPDATE ${table} SET password = ? WHERE id = ?`).run(hashedPassword, req.user.id);
 
     res.json({ message: 'Password changed successfully' });
   } catch (err) {

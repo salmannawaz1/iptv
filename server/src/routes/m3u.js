@@ -6,10 +6,10 @@ const { authenticateToken, isAdmin } = require('../middleware/auth');
 const router = express.Router();
 
 // Get all M3U playlists
-router.get('/', authenticateToken, (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const db = getDb();
-    const playlists = db.prepare(`
+    const playlists = await db.prepare(`
       SELECT id, name, filename, m3u_url, channel_count, created_at, created_by
       FROM m3u_playlists
       ORDER BY created_at DESC
@@ -23,10 +23,10 @@ router.get('/', authenticateToken, (req, res) => {
 });
 
 // Get single playlist with content
-router.get('/:id', authenticateToken, (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const db = getDb();
-    const playlist = db.prepare('SELECT * FROM m3u_playlists WHERE id = ?').get(req.params.id);
+    const playlist = await db.prepare('SELECT * FROM m3u_playlists WHERE id = ?').get(req.params.id);
     
     if (!playlist) {
       return res.status(404).json({ error: 'Playlist not found' });
@@ -40,7 +40,7 @@ router.get('/:id', authenticateToken, (req, res) => {
 });
 
 // Upload M3U file content
-router.post('/upload', authenticateToken, isAdmin, (req, res) => {
+router.post('/upload', authenticateToken, isAdmin, async (req, res) => {
   try {
     console.log('[M3U Upload] Request received');
     console.log('[M3U Upload] Body keys:', Object.keys(req.body));
@@ -70,7 +70,7 @@ router.post('/upload', authenticateToken, isAdmin, (req, res) => {
     console.log('[M3U Upload] Channel count:', channelCount);
     
     const id = uuidv4();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO m3u_playlists (id, name, filename, m3u_content, channel_count, created_by)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, name, filename || 'uploaded.m3u', m3u_content, channelCount, req.user.id);
@@ -115,7 +115,7 @@ router.post('/from-url', authenticateToken, isAdmin, async (req, res) => {
     }
     
     const id = uuidv4();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO m3u_playlists (id, name, m3u_url, m3u_content, channel_count, created_by)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, name, m3u_url, m3u_content, channelCount, req.user.id);
@@ -134,12 +134,12 @@ router.post('/from-url', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // Update playlist
-router.put('/:id', authenticateToken, isAdmin, (req, res) => {
+router.put('/:id', authenticateToken, isAdmin, async (req, res) => {
   try {
     const db = getDb();
     const { name, m3u_content, m3u_url } = req.body;
     
-    const existing = db.prepare('SELECT id FROM m3u_playlists WHERE id = ?').get(req.params.id);
+    const existing = await db.prepare('SELECT id FROM m3u_playlists WHERE id = ?').get(req.params.id);
     if (!existing) {
       return res.status(404).json({ error: 'Playlist not found' });
     }
@@ -154,7 +154,7 @@ router.put('/:id', authenticateToken, isAdmin, (req, res) => {
       }
     }
     
-    db.prepare(`
+    await db.prepare(`
       UPDATE m3u_playlists 
       SET name = COALESCE(?, name),
           m3u_content = COALESCE(?, m3u_content),
@@ -171,16 +171,16 @@ router.put('/:id', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Delete playlist
-router.delete('/:id', authenticateToken, isAdmin, (req, res) => {
+router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
   try {
     const db = getDb();
     
-    const existing = db.prepare('SELECT id FROM m3u_playlists WHERE id = ?').get(req.params.id);
+    const existing = await db.prepare('SELECT id FROM m3u_playlists WHERE id = ?').get(req.params.id);
     if (!existing) {
       return res.status(404).json({ error: 'Playlist not found' });
     }
     
-    db.prepare('DELETE FROM m3u_playlists WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM m3u_playlists WHERE id = ?').run(req.params.id);
     
     res.json({ message: 'Playlist deleted successfully' });
   } catch (err) {
@@ -190,10 +190,10 @@ router.delete('/:id', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Get M3U content as file (for users to download or for app to use)
-router.get('/:id/content', (req, res) => {
+router.get('/:id/content', async (req, res) => {
   try {
     const db = getDb();
-    const playlist = db.prepare('SELECT m3u_content, filename FROM m3u_playlists WHERE id = ?').get(req.params.id);
+    const playlist = await db.prepare('SELECT m3u_content, filename FROM m3u_playlists WHERE id = ?').get(req.params.id);
     
     if (!playlist || !playlist.m3u_content) {
       return res.status(404).json({ error: 'Playlist not found' });
