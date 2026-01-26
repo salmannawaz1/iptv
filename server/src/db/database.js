@@ -10,15 +10,14 @@ if (process.env.DATABASE_URL) {
     const usePooler = dbUrl.hostname.includes('supabase.co');
     
     if (usePooler) {
-      // Use Supabase connection pooler for IPv4 compatibility
-      const poolerHost = dbUrl.hostname.replace('db.', 'aws-0-us-east-1.pooler.');
-      console.log(`🔄 Using Supabase pooler: ${poolerHost}:6543`);
+      // Use Supabase Session Mode pooler (port 6543) for better compatibility
+      console.log(`🔄 Using Supabase Session Mode pooler on port 6543`);
       
       dbConfig = {
         user: dbUrl.username,
         password: dbUrl.password,
-        host: poolerHost,
-        port: 6543,
+        host: dbUrl.hostname, // Keep original hostname
+        port: 6543, // Use Session Mode pooler port
         database: dbUrl.pathname.slice(1),
         ssl: {
           rejectUnauthorized: false
