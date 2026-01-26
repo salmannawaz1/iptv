@@ -25,7 +25,9 @@ app.use(cors({
     'http://localhost:3000',           // Alternative dev port
     'http://127.0.0.1:5173',
     'http://192.168.100.78:5173',      // Local network
-    'https://iptv-panel.onrender.com', // Production panel
+    'https://iptv-panel.onrender.com', // Production panel (old)
+    'https://iptv-87ae.onrender.com',  // Production panel (current)
+    /^https:\/\/.*\.onrender\.com$/,   // Any Render subdomain
     /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}:\d+$/ // Any local network IP
   ],
   credentials: true
