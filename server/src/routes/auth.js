@@ -7,7 +7,7 @@ const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 // Login for admin or reseller
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -17,12 +17,12 @@ router.post('/login', (req, res) => {
 
     // Check admin first
     const db = getDb();
-    let user = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+    let user = await db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
     let role = 'admin';
 
     // If not admin, check resellers
     if (!user) {
-      user = db.prepare('SELECT * FROM resellers WHERE username = ?').get(username);
+      user = await db.prepare('SELECT * FROM resellers WHERE username = ?').get(username);
       role = 'reseller';
     }
 
