@@ -9,7 +9,7 @@ export default function Playlists() {
   const [uploading, setUploading] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [showUrlModal, setShowUrlModal] = useState(false)
-  const [uploadData, setUploadData] = useState({ name: '', content: '', filename: '' })
+  const [uploadData, setUploadData] = useState({ name: '', file: null, filename: '' })
   const [urlData, setUrlData] = useState({ name: '', m3u_url: '' })
 
   useEffect(() => {
@@ -30,21 +30,18 @@ export default function Playlists() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0]
     if (file) {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        setUploadData({
-          ...uploadData,
-          content: event.target.result,
-          filename: file.name,
-          name: uploadData.name || file.name.replace('.m3u', '')
-        })
-      }
-      reader.readAsText(file)
+      // Store file reference directly - don't read into memory
+      setUploadData({
+        ...uploadData,
+        file: file,
+        filename: file.name,
+        name: uploadData.name || file.name.replace(/\.(m3u|m3u8)$/i, '')
+      })
     }
   }
 
   const submitUpload = async () => {
-    if (!uploadData.name || !uploadData.content) {
+    if (!uploadData.name || !uploadData.file) {
       toast.error('Please provide a name and select a file')
       return
     }
@@ -52,22 +49,32 @@ export default function Playlists() {
     console.log('Uploading playlist:', {
       name: uploadData.name,
       filename: uploadData.filename,
-      contentLength: uploadData.content.length
+      fileSize: uploadData.file.size
     })
     
     setUploading(true)
     const uploadToast = toast.loading('Uploading M3U file...')
     
     try {
-      const response = await api.post('/m3u/upload', {
-        name: uploadData.name,
-        filename: uploadData.filename,
-        m3u_content: uploadData.content
+      // Use FormData for efficient large file uploads
+      const formData = new FormData()
+      formData.append('name', uploadData.name)
+      formData.append('filename', uploadData.filename)
+      formData.append('file', uploadData.file)
+      
+      const response = await api.post('/m3u/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          toast.loading(`Uploading... ${percentCompleted}%`, { id: uploadToast })
+        }
       })
       console.log('Upload response:', response.data)
-      toast.success('Playlist uploaded successfully', { id: uploadToast })
+      toast.success(`Playlist uploaded! ${response.data.channel_count} channels found`, { id: uploadToast })
       setShowUploadModal(false)
-      setUploadData({ name: '', content: '', filename: '' })
+      setUploadData({ name: '', file: null, filename: '' })
       fetchPlaylists()
     } catch (err) {
       console.error('Upload error:', err)
@@ -208,7 +215,10 @@ export default function Playlists() {
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-purple-600 file:text-white"
                 />
                 {uploadData.filename && (
-                  <p className="mt-2 text-green-400 text-sm">Selected: {uploadData.filename}</p>
+                  <p className="mt-2 text-green-400 text-sm">
+                    Selected: {uploadData.filename} 
+                    {uploadData.file && ` (${(uploadData.file.size / 1024 / 1024).toFixed(2)} MB)`}
+                  </p>
                 )}
               </div>
               <button

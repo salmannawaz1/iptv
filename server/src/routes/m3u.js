@@ -1,9 +1,22 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
+const Busboy = require('busboy');
 const { getDb } = require('../db/database');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Helper to count channels by streaming through content
+function countChannelsStreaming(content) {
+  let count = 0;
+  let pos = 0;
+  const searchStr = '#EXTINF:';
+  while ((pos = content.indexOf(searchStr, pos)) !== -1) {
+    count++;
+    pos += searchStr.length;
+  }
+  return count;
+}
 
 // Get all M3U playlists
 router.get('/', authenticateToken, async (req, res) => {
@@ -39,41 +52,165 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Upload M3U file content
-router.post('/upload', authenticateToken, isAdmin, async (req, res) => {
+// Upload M3U file using streaming (handles large files)
+router.post('/upload', authenticateToken, isAdmin, (req, res) => {
+  console.log('[M3U Upload] Request received');
+  console.log('[M3U Upload] Content-Type:', req.headers['content-type']);
+  console.log('[M3U Upload] User:', req.user.username);
+  
+  const contentType = req.headers['content-type'] || '';
+  
+  // Handle multipart form data (file upload)
+  if (contentType.includes('multipart/form-data')) {
+    handleMultipartUpload(req, res);
+  } 
+  // Handle JSON body (for smaller files or backwards compatibility)
+  else if (contentType.includes('application/json')) {
+    handleJsonUpload(req, res);
+  } else {
+    res.status(400).json({ error: 'Unsupported content type' });
+  }
+});
+
+// Handle multipart file upload with streaming
+async function handleMultipartUpload(req, res) {
   try {
-    console.log('[M3U Upload] Request received');
-    console.log('[M3U Upload] Body keys:', Object.keys(req.body));
-    console.log('[M3U Upload] User:', req.user.username);
+    const busboy = Busboy({ headers: req.headers, limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB limit
     
+    let name = '';
+    let filename = '';
+    let channelCount = 0;
+    let fileProcessed = false;
+    let m3uContent = '';
+    const MAX_STORE_SIZE = 10 * 1024 * 1024; // Only store content if < 10MB
+    let contentSize = 0;
+    let buffer = '';
+    
+    busboy.on('field', (fieldname, val) => {
+      if (fieldname === 'name') name = val;
+      if (fieldname === 'filename') filename = val;
+    });
+    
+    busboy.on('file', (fieldname, file, info) => {
+      filename = filename || info.filename || 'uploaded.m3u';
+      console.log('[M3U Upload] Processing file:', filename);
+      
+      file.on('data', (chunk) => {
+        const chunkStr = chunk.toString();
+        contentSize += chunkStr.length;
+        
+        // Count channels in this chunk
+        buffer += chunkStr;
+        
+        // Process complete lines
+        let lastNewline = buffer.lastIndexOf('\n');
+        if (lastNewline !== -1) {
+          const completeLines = buffer.substring(0, lastNewline);
+          buffer = buffer.substring(lastNewline + 1);
+          
+          // Count #EXTINF occurrences
+          channelCount += countChannelsStreaming(completeLines);
+          
+          // Store content only if small enough
+          if (contentSize <= MAX_STORE_SIZE) {
+            m3uContent += completeLines + '\n';
+          }
+        }
+      });
+      
+      file.on('end', () => {
+        // Process remaining buffer
+        if (buffer) {
+          channelCount += countChannelsStreaming(buffer);
+          if (contentSize <= MAX_STORE_SIZE) {
+            m3uContent += buffer;
+          }
+        }
+        fileProcessed = true;
+        console.log('[M3U Upload] File processed, channels:', channelCount, 'size:', contentSize);
+      });
+    });
+    
+    busboy.on('finish', async () => {
+      try {
+        if (!name) {
+          name = filename.replace(/\.(m3u|m3u8)$/i, '');
+        }
+        
+        const db = getDb();
+        const id = uuidv4();
+        
+        // For large files, don't store content - just metadata
+        const contentToStore = contentSize <= MAX_STORE_SIZE ? m3uContent : null;
+        
+        await db.prepare(`
+          INSERT INTO m3u_playlists (id, name, filename, m3u_content, channel_count, created_by)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(id, name, filename, contentToStore, channelCount, req.user.id);
+        
+        console.log('[M3U Upload] Saved playlist:', id, 'channels:', channelCount);
+        
+        res.status(201).json({
+          id,
+          name,
+          filename,
+          channel_count: channelCount,
+          stored_content: contentSize <= MAX_STORE_SIZE,
+          message: 'M3U playlist uploaded successfully'
+        });
+      } catch (err) {
+        console.error('[M3U Upload] Save error:', err);
+        res.status(500).json({ error: 'Failed to save playlist', details: err.message });
+      }
+    });
+    
+    busboy.on('error', (err) => {
+      console.error('[M3U Upload] Busboy error:', err);
+      res.status(500).json({ error: 'Upload failed', details: err.message });
+    });
+    
+    req.pipe(busboy);
+  } catch (err) {
+    console.error('[M3U Upload] Error:', err);
+    res.status(500).json({ error: 'Failed to process upload', details: err.message });
+  }
+}
+
+// Handle JSON upload (for smaller files)
+async function handleJsonUpload(req, res) {
+  try {
     const db = getDb();
     const { name, filename, m3u_content } = req.body;
     
     if (!name || !m3u_content) {
-      console.log('[M3U Upload] Missing required fields - name:', !!name, 'content:', !!m3u_content);
       return res.status(400).json({ error: 'Name and M3U content required' });
     }
     
-    console.log('[M3U Upload] Name:', name);
-    console.log('[M3U Upload] Filename:', filename);
-    console.log('[M3U Upload] Content length:', m3u_content.length);
+    console.log('[M3U Upload] JSON upload, size:', m3u_content.length);
     
-    // Count channels in M3U content
-    const lines = m3u_content.split('\n');
-    let channelCount = 0;
-    for (const line of lines) {
-      if (line.startsWith('#EXTINF:')) {
-        channelCount++;
-      }
+    // Check file size - reject if too large for JSON upload
+    if (m3u_content.length > 50 * 1024 * 1024) { // 50MB limit for JSON
+      return res.status(413).json({ 
+        error: 'File too large for JSON upload. Use multipart form upload for large files.',
+        max_size: '50MB'
+      });
     }
+    
+    // Count channels efficiently
+    const channelCount = countChannelsStreaming(m3u_content);
     
     console.log('[M3U Upload] Channel count:', channelCount);
     
     const id = uuidv4();
+    
+    // For very large content, don't store in DB
+    const MAX_STORE_SIZE = 10 * 1024 * 1024;
+    const contentToStore = m3u_content.length <= MAX_STORE_SIZE ? m3u_content : null;
+    
     await db.prepare(`
       INSERT INTO m3u_playlists (id, name, filename, m3u_content, channel_count, created_by)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, name, filename || 'uploaded.m3u', m3u_content, channelCount, req.user.id);
+    `).run(id, name, filename || 'uploaded.m3u', contentToStore, channelCount, req.user.id);
     
     console.log('[M3U Upload] Playlist saved with ID:', id);
     
@@ -82,13 +219,14 @@ router.post('/upload', authenticateToken, isAdmin, async (req, res) => {
       name,
       filename: filename || 'uploaded.m3u',
       channel_count: channelCount,
+      stored_content: m3u_content.length <= MAX_STORE_SIZE,
       message: 'M3U playlist uploaded successfully'
     });
   } catch (err) {
     console.error('[M3U Upload] Error:', err);
     res.status(500).json({ error: 'Failed to upload playlist', details: err.message });
   }
-});
+}
 
 // Add M3U from URL
 router.post('/from-url', authenticateToken, isAdmin, async (req, res) => {
