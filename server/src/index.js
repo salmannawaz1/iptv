@@ -14,7 +14,7 @@ const m3uRoutes = require('./routes/m3u');
 const { initializeDatabase } = require('./db/database');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 80;
 
 // Middleware - IMPORTANT: Set body parser limits BEFORE other middleware
 app.use(express.json({ limit: '100mb' }));
